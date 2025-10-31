@@ -13,4 +13,9 @@ export const sanitizeCacheKey = (key: string): string => {
     .slice(0, 100)
 }
 
+export const generateCollisionSafeFileName = (key: string): string => {
+  // generate a random string to prevent name collisions for edge cases, where multiple downloads occur at the same time with the same filename provided by the server
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}.${key}`
+}
+
 export default IMAGE_CACHE_FOLDER

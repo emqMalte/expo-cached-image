@@ -1,176 +1,187 @@
-import { Directory, File } from 'expo-file-system'
-import React, { useEffect, useRef, useState } from 'react'
-import { Image, ImageProps, ImageURISource } from 'react-native'
-import * as CONST from './consts'
+import { Directory, File } from "expo-file-system";
+import React, { useEffect, useRef, useState } from "react";
+import { Image, ImageProps, ImageURISource } from "react-native";
+import * as CONST from "./consts";
 
-type CachedImageProps = Omit<ImageProps, 'source'> & {
-  cacheKey: string
-  source: Omit<ImageURISource, 'uri'> & { uri: string, expiresIn?: number }
-  placeholderContent?: React.ReactNode
-}
+type CachedImageProps = Omit<ImageProps, "source"> & {
+  cacheKey: string;
+  source: Omit<ImageURISource, "uri"> & { uri: string; expiresIn?: number };
+  placeholderContent?: React.ReactNode;
+};
 
 const CachedImage: React.FC<CachedImageProps> = (props) => {
-  const { source, cacheKey, placeholderContent, ...rest } = props
-  const { uri, headers, expiresIn } = source
-  const sanitizedKey = CONST.sanitizeCacheKey(cacheKey)
-  const file = new File(CONST.IMAGE_CACHE_FOLDER, `${sanitizedKey}.png`)
-  const fileURI = file.uri
+  const { source, cacheKey, placeholderContent, ...rest } = props;
+  const { uri, headers, expiresIn } = source;
+  const sanitizedKey = CONST.sanitizeCacheKey(cacheKey);
+  const file = new File(CONST.IMAGE_CACHE_FOLDER, `${sanitizedKey}.png`);
+  const fileURI = file.uri;
 
-  const [imgUri, setImgUri] = useState<string | null>(fileURI)
+  const [imgUri, setImgUri] = useState<string | null>(fileURI);
 
-  const componentIsMounted = useRef(false)
-  const requestOption = (headers != null) ? { headers } : undefined
+  const componentIsMounted = useRef(false);
+  const requestOption = headers != null ? { headers } : undefined;
 
   useEffect(() => {
-    componentIsMounted.current = true
-    void loadImageAsync()
+    componentIsMounted.current = true;
+    void loadImageAsync();
     return () => {
-      componentIsMounted.current = false
-    }
-  }, [])
+      componentIsMounted.current = false;
+    };
+  }, []);
 
   const calculateFileAge = (modificationTime: number): number => {
-    return (Date.now() - modificationTime) / 1000
-  }
+    return (Date.now() - modificationTime) / 1000;
+  };
 
   const hasExpiryConfig = (): boolean => {
-    return expiresIn != null && expiresIn > 0
-  }
+    return expiresIn != null && expiresIn > 0;
+  };
 
   const isFileExpired = (metadata: ReturnType<typeof file.info>): boolean => {
     if (!metadata.exists || !hasExpiryConfig()) {
-      return false
+      return false;
     }
-    const fileAge = calculateFileAge(metadata.modificationTime ?? 0)
-    return fileAge > (expiresIn ?? 0)
-  }
+    const fileAge = calculateFileAge(metadata.modificationTime ?? 0);
+    return fileAge > (expiresIn ?? 0);
+  };
 
   const isFileInvalid = (metadata: ReturnType<typeof file.info>): boolean => {
-    return !metadata.exists || (metadata.size ?? 0) === 0
-  }
+    return !metadata.exists || (metadata.size ?? 0) === 0;
+  };
 
-  const shouldRedownload = (metadata: ReturnType<typeof file.info>, expired: boolean): boolean => {
-    return isFileInvalid(metadata) || expired
-  }
+  const shouldRedownload = (
+    metadata: ReturnType<typeof file.info>,
+    expired: boolean
+  ): boolean => {
+    return isFileInvalid(metadata) || expired;
+  };
 
   const downloadAndMoveFile = async (): Promise<void> => {
-    const downloaded = await File.downloadFileAsync(uri, new Directory(CONST.IMAGE_CACHE_FOLDER), requestOption)
-    // Move/rename if the server selected a different filename
-    if (downloaded.uri !== fileURI) {
-      new File(downloaded.uri).move(file)
-    }
-  }
+    const temporaryFile = new File(
+      CONST.IMAGE_CACHE_FOLDER,
+      CONST.generateCollisionSafeFileName(sanitizedKey)
+    );
+    const downloaded = await File.downloadFileAsync(
+      uri,
+      temporaryFile,
+      requestOption
+    );
+    // Move/rename temporary file to its proper filename
+    new File(downloaded.uri).move(file);
+  };
 
   const deleteExpiredFile = (): void => {
-    file.delete()
-  }
+    file.delete();
+  };
 
   const updateImageUri = (newUri: string | null): void => {
     if (componentIsMounted.current) {
-      setImgUri(newUri)
+      setImgUri(newUri);
     }
-  }
+  };
 
   const handleCachedImageLoad = async (): Promise<void> => {
-    await setImgUri(null)
-    if (!componentIsMounted.current) return
+    await setImgUri(null);
+    if (!componentIsMounted.current) return;
 
-    await downloadAndMoveFile()
-    updateImageUri(`${fileURI}`)
-  }
+    await downloadAndMoveFile();
+    updateImageUri(`${fileURI}`);
+  };
 
   const handleExpiredImageLoad = async (): Promise<void> => {
-    await setImgUri(null)
-    if (!componentIsMounted.current) return
+    await setImgUri(null);
+    if (!componentIsMounted.current) return;
 
-    deleteExpiredFile()
-    await downloadAndMoveFile()
-    updateImageUri(`${fileURI}`)
-  }
+    deleteExpiredFile();
+    await downloadAndMoveFile();
+    updateImageUri(`${fileURI}`);
+  };
 
   const handleImageLoadError = (err: unknown): void => {
-    console.error('Error loading image:', err)
-    setImgUri(uri)
-  }
+    console.error("Error loading image:", err);
+    setImgUri(uri);
+  };
 
   const loadImageAsync = async (): Promise<void> => {
     try {
-      const metadata = file.info()
-      const expired = isFileExpired(metadata)
+      const metadata = file.info();
+      const expired = isFileExpired(metadata);
 
       if (!shouldRedownload(metadata, expired)) {
-        return
+        return;
       }
 
       if (expired) {
-        await handleExpiredImageLoad()
+        await handleExpiredImageLoad();
       } else {
-        await handleCachedImageLoad()
+        await handleCachedImageLoad();
       }
     } catch (err) {
-      handleImageLoadError(err)
+      handleImageLoadError(err);
     }
-  }
+  };
 
-  if (imgUri !== null && imgUri !== '') {
+  if (imgUri !== null && imgUri !== "") {
     return (
       <Image
         {...rest}
         source={{
           ...source,
-          uri: imgUri
+          uri: imgUri,
         }}
       />
-    )
+    );
   }
 
-  return <>{placeholderContent ?? null}</>
-}
+  return <>{placeholderContent ?? null}</>;
+};
 
 export const CacheManager = {
-  addToCache: async ({ file, key }: { file: string, key: string }) => {
-    const sanitizedKey = CONST.sanitizeCacheKey(key)
-    new File(file).copy(new File(CONST.IMAGE_CACHE_FOLDER, `${sanitizedKey}.png`))
-    return await CacheManager.getCachedUri({ key })
+  addToCache: async ({ file, key }: { file: string; key: string }) => {
+    const sanitizedKey = CONST.sanitizeCacheKey(key);
+    new File(file).copy(
+      new File(CONST.IMAGE_CACHE_FOLDER, `${sanitizedKey}.png`)
+    );
+    return await CacheManager.getCachedUri({ key });
   },
 
   getCachedUri: async ({ key }: { key: string }) => {
-    const sanitizedKey = CONST.sanitizeCacheKey(key)
-    return new File(CONST.IMAGE_CACHE_FOLDER, `${sanitizedKey}.png`).uri
+    const sanitizedKey = CONST.sanitizeCacheKey(key);
+    return new File(CONST.IMAGE_CACHE_FOLDER, `${sanitizedKey}.png`).uri;
   },
 
   downloadAsync: async ({
     uri,
     key,
-    options
+    options,
   }: {
-    uri: string
-    key: string
-    options: { headers?: Record<string, string> }
+    uri: string;
+    key: string;
+    options: { headers?: Record<string, string> };
   }) => {
-    const sanitizedKey = CONST.sanitizeCacheKey(key)
+    const sanitizedKey = CONST.sanitizeCacheKey(key);
     const result = await File.downloadFileAsync(
       uri,
       new Directory(CONST.IMAGE_CACHE_FOLDER),
       options
-    )
-    const target = new File(CONST.IMAGE_CACHE_FOLDER, `${sanitizedKey}.png`)
+    );
+    const target = new File(CONST.IMAGE_CACHE_FOLDER, `${sanitizedKey}.png`);
     if (result.uri !== target.uri) {
-      new File(result.uri).move(target)
+      new File(result.uri).move(target);
     }
-    return result
+    return result;
   },
 
   getMetadata: async ({ key }: { key: string }) => {
-    const sanitizedKey = CONST.sanitizeCacheKey(key)
-    const fileRef = new File(CONST.IMAGE_CACHE_FOLDER, `${sanitizedKey}.png`)
-    const fileURI = fileRef.uri
+    const sanitizedKey = CONST.sanitizeCacheKey(key);
+    const fileRef = new File(CONST.IMAGE_CACHE_FOLDER, `${sanitizedKey}.png`);
+    const fileURI = fileRef.uri;
 
     try {
-      const metadata = fileRef.info()
+      const metadata = fileRef.info();
 
       if (!metadata.exists) {
-        return null
+        return null;
       }
 
       return {
@@ -178,13 +189,13 @@ export const CacheManager = {
         size: metadata.size ?? 0,
         modificationTime: new Date(metadata.modificationTime ?? 0),
         uri: fileURI,
-        isDirectory: false
-      }
+        isDirectory: false,
+      };
     } catch (err) {
-      console.error('Error getting cache metadata:', err)
-      return null
+      console.error("Error getting cache metadata:", err);
+      return null;
     }
-  }
-}
+  },
+};
 
-export default CachedImage
+export default CachedImage;
